@@ -7,8 +7,9 @@
 # Note: This YAML file will only work with Home Assistant >= 2024.10
 #
 
+
 modbus:
-  - name: SungrowSHx
+  - name: &sg_hub_name SungrowSHx
     type: tcp
     host: !secret sungrow_modbus_host_ip
     port: !secret sungrow_modbus_port
@@ -2690,139 +2691,147 @@ input_select:
 # note: If you change a value by the sliders, it will take up to 60 seconds until the state variables are updated
 # Unfortunately, I could not find a way to "force update" modbus registers, yet...
 automation:
+
   - id: "automation_sungrow_inverter_state"
     alias: "sungrow inverter state"
-    description: "Enables/ stops the inverter"
-    triggers:
-      - trigger: state
-        entity_id:
-          - input_select.set_sg_inverter_run_mode
-    conditions: []
+    description: "Enables/Stops the inverter"
     variables:
       sg_start: 0xCF
       sg_stop: 0xCE
-    actions:
-      - action: modbus.write_register
-        data_template:
-          hub: SungrowSHx
-          slave: !secret sungrow_modbus_slave
-          address: 12999 # reg 13000
-          value: >
-            {% if is_state('input_select.set_sg_inverter_run_mode', "Enabled") %}
-              {{sg_start}}
-            {% else %}
-              {{sg_stop}}
-            {% endif %}
-      - action: homeassistant.update_entity
-        # immediate update the sensor to reflect the new value, not waiting for the next scheduled update
-        data:
-          entity_id:
-            - sensor.system_state
-    mode: single
-
-  - id: "automation_sungrow_inverter_state_input_selector_update"
-    alias: "sungrow inverter enable/ stop input selector update"
-    description: "Updates enable/ stops input selector"
     triggers:
-      - trigger: state
+      - platform: state
+        entity_id:
+          - input_select.set_sg_inverter_run_mode
+        id: tid_ui_sg_inv_run_mode
+      - platform: state
         entity_id:
           - sensor.sungrow_inverter_state
-    conditions:
-      - condition: template
-        value_template: "{{ not is_state('sensor.sungrow_inverter_state', 'unavailable') }}"
-    actions:
-      - action: input_select.select_option
-        target:
-          entity_id: input_select.set_sg_inverter_run_mode
-        data:
-          option: >
-            {% if is_state('sensor.sungrow_inverter_state', "Shutdown") %}
-              Shutdown
-            {% else %}
-              Enabled
-            {% endif %}
-    mode: single
+        id: tid_sensor_inv_state
+    conditions: []
+    action:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: tid_ui_sg_inv_run_mode
+            sequence:
+              - action: modbus.write_register
+                data_template:
+                  hub: *sg_hub_name
+                  slave: !secret sungrow_modbus_slave
+                  address: 12999 # reg 13000
+                  value: >
+                    {% if is_state('input_select.set_sg_inverter_run_mode', "Enabled") %}
+                      {{sg_start}}
+                    {% else %}
+                      {{sg_stop}}
+                    {% endif %}
+              - delay: "00:00:01"  # delay one second 
+              - action: homeassistant.update_entity  # force update
+                data:
+                  entity_id:
+                    - sensor.system_state
+          - conditions:
+              - condition: trigger
+                id: tid_sensor_inv_state
+            sequence:
+              - action: input_select.select_option
+                target: 
+                  entity_id: input_select.set_sg_inverter_run_mode
+                data:
+                  option: >
+                    {% if is_state('sensor.sungrow_inverter_state', "Shutdown") %}
+                      Shutdown
+                    {% else %}
+                      Enabled
+                    {% endif %}
+    mode: restart # use restart to avoid warnings, when GUI is updated too often and the delay causes this automation to not finish before the next call
+
 
   - id: "automation_sungrow_inverter_update_max_soc"
     alias: "sungrow inverter update max SoC"
-    description: "Updates Sungrow max Soc holding register"
+    description: "Updates Sungrow max Soc holding register and corresponding gui input slider"
     triggers:
-      - trigger: state
+      - platform: state
         entity_id:
           - input_number.set_sg_max_soc
-    conditions: []
-    actions:
-      - action: modbus.write_register
-        data_template:
-          hub: SungrowSHx
-          slave: !secret sungrow_modbus_slave
-          address: 13057 # reg 13058
-          value: "{{ states('input_number.set_sg_max_soc') | int *10}}"
-      - action: homeassistant.update_entity
-        # immediate update the sensor to reflect the new value, not waiting for the next scheduled update
-        data:
-          entity_id:
-            - sensor.max_soc
-    mode: single
-
-  - id: "automation_sungrow_inverter_update_max_soc_input_slider_update"
-    alias: "sungrow inverter max SoC input slider update"
-    description: "Updates Sungrow max Soc input slider"
-    triggers:
-      - trigger: state
+        id: tid_ui_max_soc
+      - platform: state
         entity_id:
           - sensor.max_soc
-    conditions:
-      - condition: template
-        value_template: "{{ not is_state('sensor.max_soc', 'unavailable') }}"
-    actions:
-      - action: input_number.set_value
-        target:
-          entity_id: input_number.set_sg_max_soc
-        data:
-          value: "{{ states('sensor.max_soc') }}"
-    mode: single
+        id: tid_sensor_max_soc
+    conditions: []
+    action:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: tid_ui_max_soc
+            sequence:
+              - action: modbus.write_register
+                data_template:
+                  hub: *sg_hub_name
+                  slave: !secret sungrow_modbus_slave
+                  address: 13057 # reg 13058
+                  value: "{{ states('input_number.set_sg_max_soc') | int *10}}"
+              - delay: "00:00:01"  # delay one second 
+              - action: homeassistant.update_entity  # force update
+                data:
+                  entity_id:
+                    - sensor.max_soc
+          - conditions:
+              - condition: trigger
+                id: tid_sensor_max_soc
+            sequence:
+              - action: input_number.set_value
+                target: 
+                  entity_id: input_number.set_sg_max_soc
+                data:
+                  value: "{{ states('sensor.max_soc') }}"
+    mode: restart # use restart to avoid warnings, when GUI is updated too often and the delay causes this automation to not finish before the next call
+
 
   - id: "automation_sungrow_inverter_update_min_soc"
     alias: "sungrow inverter update min SoC"
-    description: "Updates Sungrow min Soc holding register"
+    description: "Updates Sungrow min Soc holding register and corresponding gui input slider"
     triggers:
-      - trigger: state
+      - platform: state
         entity_id:
           - input_number.set_sg_min_soc
-    conditions: []
-    actions:
-      - action: modbus.write_register
-        data_template:
-          hub: SungrowSHx
-          slave: !secret sungrow_modbus_slave
-          address: 13058 # reg 13059
-          value: "{{ states('input_number.set_sg_min_soc') | int *10}}"
-      - action: homeassistant.update_entity
-        # immediate update the sensor to reflect the new value, not waiting for the next scheduled update
-        data:
-          entity_id:
-            - sensor.min_soc
-    mode: single
-
-  - id: "automation_sungrow_inverter_update_min_soc_input_slider_update"
-    alias: "sungrow inverter min SoC input slider update"
-    description: "Updates Sungrow min Soc input slider"
-    triggers:
-      - trigger: state
+        id: tid_ui_min_soc
+      - platform: state
         entity_id:
           - sensor.min_soc
-    conditions:
-      - condition: template
-        value_template: "{{ not is_state('sensor.min_soc', 'unavailable') }}"
-    actions:
-      - action: input_number.set_value
-        target:
-          entity_id: input_number.set_sg_min_soc
-        data:
-          value: "{{ states('sensor.min_soc') }}"
-    mode: single
+        id: tid_sensor_min_soc
+    conditions: []
+    action:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: tid_ui_min_soc
+            sequence:
+              - action: modbus.write_register
+                data_template:
+                  hub: *sg_hub_name
+                  slave: !secret sungrow_modbus_slave
+                  address: 13058 # reg 13059
+                  value: "{{ states('input_number.set_sg_min_soc') | int *10}}"
+              - delay: "00:00:01"  # delay one second 
+              - action: homeassistant.update_entity  # force update
+                data:
+                  entity_id:
+                    - sensor.min_soc
+          - conditions:
+              - condition: trigger
+                id: tid_sensor_min_soc
+            sequence:
+              - action: input_number.set_value
+                target: 
+                  entity_id: input_number.set_sg_min_soc
+                data:
+                  value: "{{ states('sensor.min_soc') }}"
+    mode: restart # use restart to avoid warnings, when GUI is updated too often and the delay causes this automation to not finish before the next call
 
+
+# TODO continue refactoring / merging the automations 
   - id: "automation_sungrow_inverter_update_reserved_soc_for_backup"
     alias: "sungrow inverter update reserved soc for backup"
     description: "Updates reserved SoC for backup register"
@@ -2834,7 +2843,7 @@ automation:
     actions:
       - action: modbus.write_register
         data_template:
-          hub: SungrowSHx
+          hub: *sg_hub_name
           slave: !secret sungrow_modbus_slave
           address: 13099 # reg 13100
           value: "{{ states('input_number.set_sg_reserved_soc_for_backup') | int}}"
@@ -2878,7 +2887,7 @@ automation:
     actions:
       - action: modbus.write_register
         data_template:
-          hub: SungrowSHx
+          hub: *sg_hub_name
           slave: !secret sungrow_modbus_slave
           address: 13050 # reg 13051
           value: >
@@ -2933,7 +2942,7 @@ automation:
     actions:
       - action: modbus.write_register
         data_template:
-          hub: SungrowSHx
+          hub: *sg_hub_name
           slave: !secret sungrow_modbus_slave
           address: 13049 # reg 13050
           value: >
@@ -2973,7 +2982,7 @@ automation:
     actions:
       - action: modbus.write_register
         data_template:
-          hub: SungrowSHx
+          hub: *sg_hub_name
           slave: !secret sungrow_modbus_slave
           address: 13001 # reg 13002
           value: >
@@ -3009,7 +3018,7 @@ automation:
     actions:
       - action: modbus.write_register
         data_template:
-          hub: SungrowSHx
+          hub: *sg_hub_name
           slave: !secret sungrow_modbus_slave
           address: 13010 # reg 13011
           value: >
@@ -3062,7 +3071,7 @@ automation:
     actions:
       - action: modbus.write_register
         data_template:
-          hub: SungrowSHx
+          hub: *sg_hub_name
           slave: !secret sungrow_modbus_slave
           address: 13074 # reg 13075
           value: >
@@ -3117,7 +3126,7 @@ automation:
     actions:
       - action: modbus.write_register
         data_template:
-          hub: SungrowSHx
+          hub: *sg_hub_name
           slave: !secret sungrow_modbus_slave
           address: 13086 # reg 13087
           value: >
@@ -3162,7 +3171,7 @@ automation:
     actions:
       - action: modbus.write_register
         data_template:
-          hub: SungrowSHx
+          hub: *sg_hub_name
           slave: !secret sungrow_modbus_slave
           address: 13073 # reg 13074
           value: "{{ states('input_number.set_sg_export_power_limit') }}"
@@ -3220,7 +3229,7 @@ automation:
     actions:
       - action: modbus.write_register
         data_template:
-          hub: SungrowSHx
+          hub: *sg_hub_name
           slave: !secret sungrow_modbus_slave
           address: 13051 # reg 13052
           value: "{{ states('input_number.set_sg_forced_charge_discharge_power') | int}}"
@@ -3260,7 +3269,7 @@ automation:
     actions:
       - action: modbus.write_register
         data_template:
-          hub: SungrowSHx
+          hub: *sg_hub_name
           slave: !secret sungrow_modbus_slave
           address: 33046 # reg 33047
           value: "{{ states('input_number.set_sg_battery_max_charge_power') |float /10 |int}}"
@@ -3300,7 +3309,7 @@ automation:
     actions:
       - action: modbus.write_register
         data_template:
-          hub: SungrowSHx
+          hub: *sg_hub_name
           slave: !secret sungrow_modbus_slave
           address: 33047 # reg 33048
           value: "{{ states('input_number.set_sg_battery_max_discharge_power')  |float /10 |int}}"
@@ -3340,7 +3349,7 @@ automation:
     actions:
       - action: modbus.write_register
         data_template:
-          hub: SungrowSHx
+          hub: *sg_hub_name
           slave: !secret sungrow_modbus_slave
           address: 33148 # reg 33149
           value: "{{ states('input_number.set_sg_battery_charging_start_power') |float /10 |int}}"
@@ -3380,7 +3389,7 @@ automation:
     actions:
       - action: modbus.write_register
         data_template:
-          hub: SungrowSHx
+          hub: *sg_hub_name
           slave: !secret sungrow_modbus_slave
           address: 33149 # reg 33150
           value: "{{ states('input_number.set_sg_battery_discharging_start_power') |float /10 | int}}"
@@ -3446,7 +3455,7 @@ automation:
     actions:
       - action: modbus.write_register
         data_template:
-          hub: SungrowSHx
+          hub: *sg_hub_name
           slave: !secret sungrow_modbus_slave
           address: 30229 # reg 30230
           value: >
