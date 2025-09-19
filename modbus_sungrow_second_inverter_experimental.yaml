@@ -2935,117 +2935,182 @@ automation:
                   option: "{{ states('sensor.battery_forced_charge_discharge_cmd_2') }}"
     mode: restart # use restart to avoid warnings, when GUI is updated too often and the delay causes this automation to not finish before the next call
 
-
-# TODO continue refactoring / merging the automations 
-  - id: "automation_sungrow_inverter_2_update_ems_mode"
-    alias: "sungrow inverter 2 update EMS mode"
-    description: "Updates EMS mode"
-    triggers:
-      - trigger: state
-        entity_id:
-          - input_select.set_sg_2_ems_mode
-    conditions: []
+  - id: "automation_sungrow_inverter_2_ems_mode"
+    alias: "sungrow inverter 2 EMS mode"
+    description: "Updates EMS mode and corresponding gui input"
     variables:
       ems_mode_self_consume: 0
       ems_mode_forced: 2
       ems_mode_external: 3
       ems_mode_vpp: 4
       ems_mode_microgrid: 8
-    actions:
-      - action: modbus.write_register
-        data_template:
-          hub: *sg_hub_name
-          slave: !secret sungrow_modbus_slave_inv2
-          address: *sg_addr_ems_mode_selection
-          value: >
-            {% if is_state('input_select.set_sg_2_ems_mode', "Self-consumption mode (default)") %} 
-              {{ems_mode_self_consume}}
-            {% elif is_state('input_select.set_sg_2_ems_mode', "Forced mode") %} 
-              {{ems_mode_forced}}
-            {% elif is_state('input_select.set_sg_2_ems_mode', "External EMS") %} 
-              {{ems_mode_external}}
-            {% elif is_state('input_select.set_sg_2_ems_mode', "VPP") %} 
-              {{ems_mode_vpp}}
-            {% elif is_state('input_select.set_sg_2_ems_mode', "MicroGrid") %} 
-              {{ems_mode_microgrid}}
-            {% else %} 
-              {{ems_mode_self_consume}}
-            {% endif %}
-      - action: homeassistant.update_entity
-        # immediate update the sensor to reflect the new value, not waiting for the next scheduled update
-        data:
-          entity_id:
-            - sensor.ems_mode_selection_raw_2
-    mode: single
-
-  - id: "automation_sungrow_inverter_2_update_load_adjustment_mode"
-    alias: "sungrow inverter 2 update Load adjustment mode"
-    description: "Updates Load adjustment mode"
     triggers:
-      - trigger: state
+      - platform: state
         entity_id:
-          - input_select.set_sg_2_load_adjustment_mode
+          - input_select.set_sg_2_ems_mode
+        id: tid_ui_ems_mode
+      - platform: state
+        entity_id:
+          - sensor.ems_mode_selection_2
+        id: tid_sensor_ems_mode
     conditions: []
+    action:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: tid_ui_ems_mode
+            sequence:
+              - action: modbus.write_register
+                data_template:
+                  hub: *sg_hub_name
+                  slave: !secret sungrow_modbus_slave_inv2
+                  address: *sg_addr_ems_mode_selection
+                  value: >
+                    {% if is_state('input_select.set_sg_2_ems_mode', "Self-consumption mode (default)") %} 
+                      {{ems_mode_self_consume}}
+                    {% elif is_state('input_select.set_sg_2_ems_mode', "Forced mode") %} 
+                      {{ems_mode_forced}}
+                    {% elif is_state('input_select.set_sg_2_ems_mode', "External EMS") %} 
+                      {{ems_mode_external}}
+                    {% elif is_state('input_select.set_sg_2_ems_mode', "VPP") %} 
+                      {{ems_mode_vpp}}
+                    {% elif is_state('input_select.set_sg_2_ems_mode', "MicroGrid") %} 
+                      {{ems_mode_microgrid}}
+                    {% else %} 
+                      {{ems_mode_self_consume}}
+                    {% endif %}
+              - delay: "00:00:01"  # delay one second                       
+              - action: homeassistant.update_entity
+                # immediate update the sensor to reflect the new value, not waiting for the next scheduled update
+                data:
+                  entity_id:
+                    - sensor.ems_mode_selection_raw_2
+          - conditions:
+              - condition: trigger
+                id: tid_sensor_ems_mode
+              - condition: template
+                value_template: "{{ not is_state('sensor.ems_mode_selection_2', 'unavailable') }}"
+            sequence:
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.set_sg_2_ems_mode
+              data:
+                option: "{{ states('sensor.ems_mode_selection_2') }}"
+    mode: restart # use restart to avoid warnings, when GUI is updated too often and the delay causes this automation to not finish before the next call
+
+  - id: "automation_sungrow_inverter_2_load_adjustment_mode"
+    alias: "sungrow inverter 2 Load adjustment mode"
+    description: "Updates Load adjustment mode and corresponding gui input"
     variables:
       load_adjustment_mode_timing: 0
       load_adjustment_on_off: 1
       load_adjustment_power_optimized: 2
       load_adjustment_disabled: 3
-    actions:
-      - action: modbus.write_register
-        data_template:
-          hub: *sg_hub_name
-          slave: !secret sungrow_modbus_slave_inv2
-          address: 13001 # reg 13002
-          value: >
-            {% if is_state('input_select.set_sg_2_load_adjustment_mode', "Timing") %} 
-              {{load_adjustment_mode_timing}}
-            {% elif is_state('input_select.set_sg_2_load_adjustment_mode', "ON/OFF") %} 
-              {{load_adjustment_on_off}}
-            {% elif is_state('input_select.set_sg_2_load_adjustment_mode', "Power optimization") %} 
-              {{load_adjustment_power_optimized}}
-            {% elif is_state('input_select.set_sg_2_load_adjustment_mode', "Disabled") %} 
-              {{load_adjustment_disabled}}
-            {% else %} 
-              {{load_adjustment_disabled}}
-            {% endif %}
-      - action: homeassistant.update_entity
-        # immediate update the sensor to reflect the new value, not waiting for the next scheduled update
-        data:
-          entity_id:
-            - sensor.load_adjustment_mode_selection_raw
-    mode: single
-
-  - id: "automation_sungrow_inverter_2_update_load_adjustment_mode_on_off"
-    alias: "sungrow inverter 2 update Load adjustment mode ON/OFF"
-    description: "Updates Load adjustment mode ON/OFF"
     triggers:
-      - trigger: state
+      - platform: state
         entity_id:
-          - input_select.set_sg_2_load_adjustment_mode_on_off
+          - input_select.set_sg_2_load_adjustment_mode
+        id: tid_ui_load_adjustment_mode
+      - platform: state
+        entity_id:
+          - sensor.load_adjustment_mode_selection
+        id: tid_sensor_load_adjustment_mode
     conditions: []
+    action:    
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: tid_ui_load_adjustment_mode
+            sequence:
+            - action: modbus.write_register
+              data_template:
+                hub: *sg_hub_name
+                slave: !secret sungrow_modbus_slave_inv2
+                address: 13001 # reg 13002
+                value: >
+                  {% if is_state('input_select.set_sg_2_load_adjustment_mode', "Timing") %} 
+                    {{load_adjustment_mode_timing}}
+                  {% elif is_state('input_select.set_sg_2_load_adjustment_mode', "ON/OFF") %} 
+                    {{load_adjustment_on_off}}
+                  {% elif is_state('input_select.set_sg_2_load_adjustment_mode', "Power optimization") %} 
+                    {{load_adjustment_power_optimized}}
+                  {% elif is_state('input_select.set_sg_2_load_adjustment_mode', "Disabled") %} 
+                    {{load_adjustment_disabled}}
+                  {% else %} 
+                    {{load_adjustment_disabled}}
+                  {% endif %}
+            - delay: "00:00:01"  # delay one second                   
+            - action: homeassistant.update_entity
+              # immediate update the sensor to reflect the new value, not waiting for the next scheduled update
+              data:
+                entity_id:
+                  - sensor.load_adjustment_mode_selection_raw
+          - conditions:
+              - condition: trigger
+                id: tid_sensor_load_adjustment_mode
+              - condition: template
+                value_template: "{{ not is_state('sensor.load_adjustment_mode_selection', 'unavailable') }}"
+            sequence:
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.set_sg_2_load_adjustment_mode
+              data:
+                option: "{{ states('sensor.load_adjustment_mode_selection') }}"
+    mode: restart # use restart to avoid warnings, when GUI is updated too often and the delay causes this automation to not finish before the next call
+
+  - id: "automation_sungrow_inverter_2_load_adjustment_mode_on_off"
+    alias: "sungrow inverter 2 Load adjustment mode ON/OFF"
+    description: "Updates Load adjustment mode ON/OFF and corresponding gui input"
     variables:
       load_adjustment_mode_on_off_on: 0xAA
       load_adjustment_mode_on_off_off: 0x55
-    actions:
-      - action: modbus.write_register
-        data_template:
-          hub: *sg_hub_name
-          slave: !secret sungrow_modbus_slave_inv2
-          address: 13010 # reg 13011
-          value: >
-            {% if is_state('input_select.set_sg_2_load_adjustment_mode_on_off', "ON") %} 
-              {{load_adjustment_mode_on_off_on}}
-            {% elif is_state('input_select.set_sg_2_load_adjustment_mode_on_off', "OFF") %} 
-              {{load_adjustment_mode_on_off_off}}
-            {% endif %}
-      - action: homeassistant.update_entity
-        # immediate update the sensor to reflect the new value, not waiting for the next scheduled update
-        data:
-          entity_id:
-            - sensor.load_adjustment_mode_on_off_selection_raw
-    mode: single
+    triggers:
+      - platform: state
+        entity_id:
+          - input_select.set_sg_2_load_adjustment_mode_on_off
+        id: tid_ui_load_adjustment_mode_on_off
+      - platform: state
+        entity_id:
+          - sensor.load_adjustment_mode_on_off_selection_raw
+        id: tid_sensor_load_adjustment_mode_on_off
+    conditions: []
+    action:    
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: tid_ui_load_adjustment_mode
+            sequence:
+              - action: modbus.write_register
+                data_template:
+                  hub: *sg_hub_name
+                  slave: !secret sungrow_modbus_slave_inv2
+                  address: 13010 # reg 13011
+                  value: >
+                    {% if is_state('input_select.set_sg_2_load_adjustment_mode_on_off', "ON") %} 
+                      {{load_adjustment_mode_on_off_on}}
+                    {% elif is_state('input_select.set_sg_2_load_adjustment_mode_on_off', "OFF") %} 
+                      {{load_adjustment_mode_on_off_off}}
+                    {% endif %}
+              - delay: "00:00:01"  # delay one second                       
+              - action: homeassistant.update_entity
+                # immediate update the sensor to reflect the new value, not waiting for the next scheduled update
+                data:
+                  entity_id:
+                    - sensor.load_adjustment_mode_on_off_selection_raw
+          - conditions:
+              - condition: trigger
+                id: tid_sensor_load_adjustment_mode_on_off
+              - condition: template
+                value_template: "{{ not is_state('sensor.load_adjustment_mode_selection_on_off', 'unavailable') }}"
+            sequence:
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.set_sg_2_load_adjustment_mode_on_off
+              data:
+                option: "{{ states('sensor.load_adjustment_mode_selection_on_off') }}"
+    mode: restart # use restart to avoid warnings, when GUI is updated too often and the delay causes this automation to not finish before the next call
 
+# TODO continue refactoring / merging the automations 
   - id: "automation_sungrow_inverter_2_export_power_limit_mode_update"
     alias: "sungrow inverter 2 export power limit mode update"
     description: "Updates Enable/Disable for export power limit mode"
@@ -3165,11 +3230,13 @@ automation:
           - sensor.export_power_limit_2
     conditions: []
     actions:
+      - condition: template
+        value_template: "{{ states('sensor.export_power_limit_2')|is_number }}"
       - action: input_number.set_value
         target:
           entity_id: input_number.set_sg_2_export_power_limit
         data:
-          value: "{{ states('sensor.export_power_limit_2') }}"
+          value: "{{ states('sensor.export_power_limit_2') }}"          
     mode: single
 
   - id: "automation_sungrow_inverter_2_set_export_power_limit"
@@ -3192,42 +3259,6 @@ automation:
         data:
           entity_id:
             - sensor.export_power_limit_2
-    mode: single
-
-  - id: "automation_sungrow_inverter_2_update_load_adjustment_mode_input_select_update"
-    alias: "sungrow inverter 2 update Load adjustment mode input select update"
-    description: "Updates Load adjustment mode input select"
-    triggers:
-      - trigger: state
-        entity_id:
-          - sensor.load_adjustment_mode_selection
-    conditions:
-      - condition: template
-        value_template: "{{ not is_state('sensor.load_adjustment_mode_selection', 'unavailable') }}"
-    actions:
-      - action: input_select.select_option
-        target:
-          entity_id: input_select.set_sg_2_load_adjustment_mode
-        data:
-          option: "{{ states('sensor.load_adjustment_mode_selection') }}"
-    mode: single
-
-  - id: "automation_sungrow_inverter_2_update_ems_mode_input_select_update"
-    alias: "sungrow inverter 2 update EMS mode input select update"
-    description: "Updates EMS mode input select"
-    triggers:
-      - trigger: state
-        entity_id:
-          - sensor.ems_mode_selection_2
-    conditions:
-      - condition: template
-        value_template: "{{ not is_state('sensor.ems_mode_selection_2', 'unavailable') }}"
-    actions:
-      - action: input_select.select_option
-        target:
-          entity_id: input_select.set_sg_2_ems_mode
-        data:
-          option: "{{ states('sensor.ems_mode_selection_2') }}"
     mode: single
 
   - id: "automation_sungrow_inverter_2_update_battery_forced_charge_discharge_power"
